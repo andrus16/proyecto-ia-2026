@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import os
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.model_selection import train_test_split
@@ -9,163 +8,156 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
 
 # Configuración de la página
-st.set_page_config(page_title="Clasificador IA 2026", layout="wide")
+st.set_page_config(page_title="Plataforma de Clasificación - Regresión Logística", layout="wide")
 st.title("🤖 Plataforma de Clasificación con Regresión Logística")
-st.write("Proyecto Final - Inteligencia Artificial y Aprendizaje De Máquina")
 
-# Asegurar que exista la carpeta datasets
-if not os.path.exists("datasets"):
-    os.makedirs("datasets")
-
-# --- GENERADOR DEL DATASET CHURN ---
-if not os.path.exists("datasets/churn_ejemplo.csv"):
-    np.random.seed(42)
-    n_muestras = 400
-    antiguedad_meses = np.random.randint(1, 72, size=n_muestras)
-    factura_mensual = np.random.uniform(20.0, 120.0, size=n_muestras)
-    reclamos_soporte = np.random.randint(0, 6, size=n_muestras)
-    
-    score = (reclamos_soporte * 1.8) + (factura_mensual * 0.02) - (antiguedad_meses * 0.06)
-    probabilidad = 1 / (1 + np.exp(-score))
-    churn = (probabilidad > 0.5).astype(int)
-    
-    df_churn = pd.DataFrame({
-        'Antiguedad_Meses': antiguedad_meses,
-        'Factura_Mensual': np.round(factura_mensual, 2),
-        'Reclamos_Soporte': reclamos_soporte,
-        'Cancelo_Servicio': churn
-    })
-    df_churn.to_csv("datasets/churn_ejemplo.csv", index=False)
-
-# --- INTERFAZ DE USUARIO (BARRA LATERAL) ---
+# --- BARRA LATERAL: CONFIGURACIÓN DE DATOS ---
 st.sidebar.header("⚙️ Configuración de Datos")
-opcion_datos = st.sidebar.selectbox(
+opcion_data = st.sidebar.selectbox(
     "Selecciona el conjunto de datos:",
-    ("Ejemplo 2: Rotación de Clientes (Churn)", "Ejemplo 1: Diagnóstico de Diabetes", "Subir mi propio CSV")
+    ["Ejemplo 2: Rotación de Clientes (Churn)", "Subir mi propio CSV"]
 )
 
 df = None
 
-# --- LÓGICA DE CARGA ---
-if opcion_datos == "Ejemplo 2: Rotación de Clientes (Churn)":
-    df = pd.read_csv("datasets/churn_ejemplo.csv")
-    st.subheader("📊 Dataset: Rotación de Clientes / Churn")
-
-elif opcion_datos == "Ejemplo 1: Diagnóstico de Diabetes":
-    if os.path.exists("datasets/diabetes_ejemplo.csv"):
-        columnas = ['Embarazos', 'Glucosa', 'PresionArterial', 'GrosorPiel', 'Insulina', 'IMC', 'PedigreeDiabetes', 'Edad', 'Resultado']
-        df = pd.read_csv("datasets/diabetes_ejemplo.csv", names=columnas)
-        st.subheader("📊 Dataset: Diagnóstico de Diabetes")
-    else:
-        st.error("Por favor, asegúrate de haber descargado 'diabetes_ejemplo.csv' en la carpeta 'datasets'.")
-
-elif opcion_datos == "Subir mi propio CSV":
-    archivo_subido = st.sidebar.file_uploader("Sube tu archivo CSV", type=["csv"])
-    if archivo_subido is not None:
-        df = pd.read_csv(archivo_subido)
-        st.subheader("📥 Dataset Personalizado Cargado")
-
-# --- PROCESAMIENTO Y ENTRENAMIENTO ---
-if df is not None:
-    st.dataframe(df.head(10))
-    st.success(f"Filas detectadas: {df.shape[0]} | Columnas detectadas: {df.shape[1]}")
+# Opción 1: Dataset Simulado Autónomo (Churn de Clientes)
+if "Ejemplo 2" in opcion_data:
+    np.random.seed(42)
+    n_samples = 400
+    edad = np.random.randint(18, 70, n_samples)
+    ingresos = np.random.randint(15, 120, n_samples) * 1000
+    reclamos = np.random.randint(0, 10, n_samples)
+    antiguedad = np.random.randint(1, 60, n_samples)
     
-    # Separar características (X) y variable objetivo (y)
+    # Lógica para definir la clase objetivo (0 o 1)
+    score = 0.05 * edad - 0.00002 * ingresos + 0.6 * reclamos - 0.04 * antiguedad
+    prob = 1 / (1 + np.exp(-score))
+    churn = (prob > 0.5).astype(int)
+    
+    df = pd.DataFrame({
+        'Edad': edad,
+        'Ingresos_Anuales': ingresos,
+        'Reclamos_Soporte': reclamos,
+        'Antiguedad_Meses': antiguedad,
+        'Churn': churn
+    })
+    st.sidebar.success("✅ Cargado: Ejemplo 2 (Churn de Clientes)")
+
+# Opción 2: Cargar archivo propio con validación robusta de encabezados
+else:
+    uploaded_file = st.sidebar.file_uploader("Sube tu archivo CSV", type=["csv"])
+    if uploaded_file is not None:
+        try:
+            # Inspeccionamos la primera fila para saber si tiene títulos o son números directos
+            first_row = pd.read_csv(uploaded_file, nrows=1, header=None)
+            uploaded_file.seek(0)
+            
+            # Intentamos convertir el primer elemento a número
+            float(first_row.iloc[0, 0])
+            
+            # Si no falla, significa que NO tiene encabezados. Asignamos nombres automáticos.
+            df_raw = pd.read_csv(uploaded_file, header=None)
+            num_cols = df_raw.shape[1]
+            columnas_nuevas = [f"Variable_{i+1}" if i < num_cols - 1 else "Clase_Objetivo" for i in range(num_cols)]
+            df_raw.columns = columnas_nuevas
+            df = df_raw.copy()
+            st.sidebar.info("💡 CSV sin encabezados detectado. Columnas nombradas automáticamente.")
+        except ValueError:
+            # Si falla la conversión a float, la primera fila es texto (tiene encabezados normales)
+            df = pd.read_csv(uploaded_file)
+            st.sidebar.success("✅ CSV con encabezados cargado exitosamente.")
+    else:
+        st.info("👈 Por favor, sube un archivo CSV en la barra lateral para comenzar.")
+
+# --- PROCESAMIENTO Y MODELADO (Si los datos existen) ---
+if df is not None:
+    # Mostrar vista previa de los datos cargados
+    st.subheader("📋 Vista Previa de los Datos")
+    st.datasource = st.dataframe(df.head(10))
+    
+    # Definición de X (características) e y (clase objetivo)
     X = df.iloc[:, :-1]
     y = df.iloc[:, -1]
     
-    st.divider()
+    # Control deslizante interactivo para el Train/Test Split
+    st.sidebar.markdown("---")
+    st.sidebar.header("🧠 Parámetros del Modelo")
+    test_size_percentage = st.sidebar.slider("Porcentaje de datos de prueba (Test Split):", 10, 50, 20, step=5)
+    test_size = test_size_percentage / 100.0
     
-    # Crear pestañas para organizar la app de forma profesional
-    tab1, tab2, tab3 = st.tabs(["🧠 Entrenamiento y Coeficientes", "📈 Evaluación del Desempeño", "🔮 Realizar Predicciones"])
+    # Separación de datos
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42, stratify=y)
     
-    # Inicializar el modelo en el estado de la sesión para que persista entre pestañas
-    if 'modelo_entrenado' not in st.session_state:
-        st.session_state.modelo_entrenado = None
-        st.session_state.X_columns = list(X.columns)
+    # Entrenamiento del modelo de Regresión Logística
+    model = LogisticRegression(max_iter=1000)
+    model.fit(X_train, y_train)
     
+    # Predicciones
+    y_pred = model.predict(X_test)
+    
+    # --- INTERFAZ DE PESTAÑAS ---
+    tab1, tab2, tab3 = st.tabs(["📊 Entrenamiento y Coeficientes", "📈 Evaluación del Desempeño", "🔮 Realizar Predicciones"])
+    
+    # PESTAÑA 1: Coeficientes del modelo ajustado
     with tab1:
-        st.header("Configuración del Entrenamiento")
-        porcentaje_test = st.slider("Porcentaje de datos para Prueba (Test Split):", 10, 40, 20) / 100
+        st.subheader("🧮 Coeficientes e Intercepto Calculados")
+        st.write("A continuación se muestran los pesos asignados por el modelo a cada variable matemática:")
         
-        if st.button("🚀 Entrenar Regresión Logística"):
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=porcentaje_test, random_state=42)
-            
-            modelo = LogisticRegression()
-            modelo.fit(X_train, y_train)
-            
-            # Guardar en sesión
-            st.session_state.modelo_entrenado = modelo
-            st.session_state.X_test = X_test
-            st.session_state.y_test = y_test
-            st.session_state.y_pred = modelo.predict(X_test)
-            
-            st.success("¡Modelo entrenado exitosamente!")
-            
-            # Mostrar Coeficientes
-            st.subheader("📋 Coeficientes del Modelo ($\beta$)")
-            df_coef = pd.DataFrame({
-                'Característica (Variable)': X.columns,
-                'Coeficiente (Peso)': modelo.coef_[0]
-            })
-            st.table(df_coef)
-            st.write(f"**Intercepto ($\beta_0$):** {modelo.intercept_[0]:.4f}")
-            st.info("💡 Un coeficiente positivo significa que al aumentar esa variable, aumenta la probabilidad de ser Clase 1. Un coeficiente negativo indica lo contrario.")
-
+        coef_df = pd.DataFrame({
+            'Característica (Variable)': X.columns,
+            'Coeficiente (Peso)': model.coef_[0]
+        })
+        st.table(coef_df)
+        st.metric(label="Intercepto (Beta_0)", value=f"{model.intercept_[0]:.4f}")
+        st.info("💡 Un coeficiente positivo incrementa la probabilidad de pertenecer a la Clase 1. Un coeficiente negativo la disminuye.")
+        
+    # PESTAÑA 2: Métricas de rendimiento y gráficos
     with tab2:
-        st.header("Métricas de Validación")
-        if st.session_state.modelo_entrenado is not None:
-            y_test = st.session_state.y_test
-            y_pred = st.session_state.y_pred
-            
-            exactitud = accuracy_score(y_test, y_pred)
-            st.metric(label="Exactitud General (Accuracy)", value=f"{exactitud * 100:.2f}%")
-            
-            # Gráfico de Matriz de Confusión
-            st.subheader("📊 Matriz de Confusión")
-            cm = confusion_matrix(y_test, y_pred)
-            fig, ax = plt.subplots(figsize=(5, 3.5))
-            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax, 
-                        xticklabels=['Clase 0 (Negativo)', 'Clase 1 (Positivo)'],
-                        yticklabels=['Clase 0 (Negativo)', 'Clase 1 (Positivo)'])
-            plt.ylabel('Clase Real')
-            plt.xlabel('Clase Predicha')
-            st.pyplot(fig)
-            
-            # Reporte de Clasificación detallado
-            st.subheader("📝 Reporte de Clasificación Completo")
-            reporte = classification_report(y_test, y_pred, output_dict=True)
-            df_reporte = pd.DataFrame(reporte).transpose()
-            st.dataframe(df_reporte.style.format(precision=2))
-        else:
-            st.warning("⚠️ Primero debes ir a la pestaña de entrenamiento y presionar el botón de entrenar.")
+        st.subheader("🎯 Métricas de Validación")
+        acc = accuracy_score(y_test, y_pred)
+        st.metric(label="Exactitud General (Accuracy)", value=f"{acc * 100:.2f}%")
+        
+        # Reporte de Clasificación en formato texto estructurado
+        st.markdown("**📋 Reporte Detallado de Clasificación:**")
+        report_dict = classification_report(y_test, y_pred, output_dict=True)
+        st.json(report_dict)
+        
+        # Gráfico dinámico de la Matriz de Confusión
+        st.markdown("**🧩 Matriz de Confusión Visual:**")
+        cm = confusion_matrix(y_test, y_pred)
+        fig, ax = plt.subplots(figsize=(5, 4))
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', cbar=False,
+                    xticklabels=['Predicho 0', 'Predicho 1'],
+                    yticklabels=['Real 0', 'Real 1'], ax=ax)
+        plt.ylabel('Realidad')
+        plt.xlabel('Predicción')
+        st.pyplot(fig)
 
+    # PESTAÑA 3: Formulario interactivo para nuevas predicciones independientes
     with tab3:
-        st.header("🔮 Clasificador en Tiempo Real")
-        if st.session_state.modelo_entrenado is not None:
-            st.write("Modifica los valores de las variables para simular un nuevo caso:")
+        st.subheader("🔮 Ingreso de Datos en Tiempo Real")
+        st.write("Modifica los siguientes valores numéricos para evaluar cómo respondería el modelo ante un nuevo registro:")
+        
+        inputs = {}
+        # Recorremos dinámicamente las variables usando el dataframe original
+        for col in X.columns:
+            val_min = float(df[col].min())
+            val_max = float(df[col].max())
+            val_mean = float(df[col].mean())
             
-            # Crear entradas dinámicas según las columnas del dataset cargado
-            datos_nuevos = {}
-            for col in st.session_state.X_columns:
-                # Valores por defecto inteligentes según el nombre de la columna
-                val_min = float(df[col].min())
-                val_max = float(df[col].max())
-                val_promedio = float(df[col].mean())
-                datos_nuevos[col] = st.number_input(f"Valor para '{col}':", min_value=val_min, max_value=val_max, value=val_promedio)
+            # Creamos un campo interactivo adaptado al rango real de cada variable
+            inputs[col] = st.number_input(f"Valor para '{col}':", min_value=val_min, max_value=val_max, value=val_mean)
             
-            if st.button("🔮 Clasificar Registro"):
-                # Darle formato de fila al input
-                input_df = pd.DataFrame([datos_nuevos])
-                
-                # Predecir clase y probabilidad
-                prediccion = st.session_state.modelo_entrenado.predict(input_df)[0]
-                probabilidad = st.session_state.modelo_entrenado.predict_proba(input_df)[0][1]
-                
-                st.subheader("Resultado de la Predicción:")
-                if prediccion == 1:
-                    st.error(f"🔴 **Clasificado como CLASE 1** (Probabilidad: {probabilidad*100:.2f}%)")
-                else:
-                    st.success(f"🟢 **Clasificado como CLASE 0** (Probabilidad: {probabilidad*100:.2f}%)")
-        else:
-            st.warning("⚠️ Primero debes ir a la pestaña de entrenamiento y presionar el botón de entrenar.")
+        # Conversión de las entradas a matriz para Scikit-Learn
+        input_data = np.array([list(inputs.values())])
+        
+        if st.button("🚀 Ejecutar Clasificación"):
+            prediction = model.predict(input_data)[0]
+            probability = model.predict_proba(input_data)[0][1]
+            
+            st.markdown("---")
+            st.subheader("🎯 Resultado del Diagnóstico Predictivo")
+            if prediction == 1:
+                st.error(f"🔴 Clasificación Asignada: **Clase 1** (Probabilidad calculada: {probability * 100:.2f}%)")
+            else:
+                st.success(f"🟢 Clasificación Asignada: **Clase 0** (Probabilidad calculada: {(1 - probability) * 100:.2f}%)")
